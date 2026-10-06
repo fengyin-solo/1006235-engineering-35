@@ -18,6 +18,27 @@
       </article>
     </div>
 
+    <div v-if="reassignments.length" class="report-panel">
+      <div class="report-head">
+        <h3>值守人员改派（随检修人员台账自检结论联动）</h3>
+        <span class="report-meta">待办记录的值守人员必须在场且持证有效，共改派 {{ reassignments.length }} 条，台账与本清单同一次落库</span>
+      </div>
+      <table class="data-table issue-table">
+        <thead>
+          <tr><th>记录编号</th><th>观测时间</th><th>原值守</th><th>改派为</th><th>缘由</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="(item, index) in reassignments" :key="index">
+            <td>{{ item.记录编号 }}</td>
+            <td>{{ item.观测时间 }}</td>
+            <td>{{ item.from }}</td>
+            <td>{{ item.to }}</td>
+            <td>{{ item.reason }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <p class="status-legend">
       <span v-for="item in statusSummary" :key="item.status" class="legend-item">
         {{ item.status }}：{{ item.count }}
@@ -76,22 +97,42 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  loadCrewReport,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import type { CrewReport, HydrologyChange } from '@/data/crew/pipeline'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('hydrology')
 const columns = ["记录编号", "观测时间", "上游水位", "下游水位", "入库流量", "出库流量", "值守人员", "调度状态"]
 const actions = ["提交观测", "下达调度", "提交复核"]
 const statuses = ["待观测", "已观测", "已调度", "已复核"]
-const stats = [{"label": "今日入库流量", "value": 0}, {"label": "今日出库流量", "value": 0}, {"label": "待调度记录", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const report = ref<CrewReport>(loadCrewReport())
+const reassignments = computed<HydrologyChange[]>(() => report.value.hydrologyChanges)
+
+// 今日口径取最新观测时间的记录；待办数直接取自检报告，与运营概览的「水情待办」同源。
+const stats = computed(() => {
+  const latestTime = rows.value.reduce((max, row) => {
+    const value = String(row.观测时间 ?? '')
+    return value > max ? value : max
+  }, '')
+  const todays = rows.value.filter((row) => String(row.观测时间) === latestTime)
+  const numberAt = (field: string) => (list: EntryRow[]) =>
+    list.reduce((sum, row) => sum + Number(row[field] ?? 0), 0)
+  return [
+    { label: `今日入库流量（${latestTime || '—'}）`, value: numberAt('入库流量')(todays) },
+    { label: '今日出库流量', value: numberAt('出库流量')(todays) },
+    { label: '待调度记录', value: report.value.totals.hydrologyPending },
+  ]
+})
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +169,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    report.value = loadCrewReport()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '水情调度列表读取失败'
   }

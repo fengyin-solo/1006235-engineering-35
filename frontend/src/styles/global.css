@@ -35,3 +35,27 @@ body { margin: 0; background: #f6f8fb; color: #1f2937; }
 .error-text { color: #b42318; }
 .status-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; font-size: 12px; color: var(--muted); }
 .legend-item { background: #eef2f7; border-radius: 999px; padding: 2px 10px; }
+
+/* ===== 台账迁移自检面板 ===== */
+.report-panel { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 4px 0 14px; }
+.report-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.report-head h3 { margin: 0; font-size: 15px; }
+.report-meta { color: var(--muted); font-size: 12px; }
+.stage-list { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.stage-item { display: flex; gap: 10px; align-items: flex-start; }
+.stage-index { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--brand); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+.stage-item strong { font-size: 13px; }
+.stage-item p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.reconcile-line { font-size: 12px; border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+.reconcile-ok { background: #ecfdf3; color: #027a48; border: 1px solid #abefc6; }
+.reconcile-bad { background: #fef3f2; color: #b42318; border: 1px solid #fda29b; }
+.issue-title { font-size: 13px; margin: 10px 0 6px; }
+.issue-table th, .issue-table td { font-size: 12px; vertical-align: top; }
+.issue-tag { border-radius: 999px; padding: 1px 8px; white-space: nowrap; font-size: 12px; }
+.tag-dup { background: #fef0c7; color: #b54708; }
+.tag-missing { background: #e0e7ff; color: #3538cd; }
+.tag-conflict { background: #fde7f3; color: #c11574; }
+.tag-expired { background: #fee4e2; color: #b42318; }
+.rule-details { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.rule-list { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.stat-warn { color: #b42318; }

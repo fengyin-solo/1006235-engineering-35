@@ -1,5 +1,7 @@
+import { allRows, crewReport, listRows, reinitializeCrew, resetRows, saveRows } from '@/data/local-store'
 import { MODULE_BY_KEY } from '@/data/modules'
-import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { ACTIVE_TEAMS, DEPARTED_TEAM, teamForPost } from '@/data/crew/pipeline'
+import type { CrewReport } from '@/data/crew/pipeline'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
@@ -28,6 +30,21 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
+/**
+ * 检修人员状态流转时同步维护台账内部一致性（自检规则在页面动作上的延续）：
+ * 已离场 → 撤场班组；非离场状态回到在役班组。
+ */
+function applyCrewConsistency(row: EntryRow): EntryRow {
+  const status = String(row.在场状态 ?? '')
+  let team = String(row.所属班组 ?? '')
+  if (status === '已离场') {
+    if (team !== DEPARTED_TEAM) team = DEPARTED_TEAM
+  } else if (team === DEPARTED_TEAM) {
+    team = teamForPost(String(row.岗位 ?? '')) || ACTIVE_TEAMS[0]
+  }
+  return { ...row, 所属班组: team }
+}
+
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
   const target = meta.actionTargets[action]
@@ -44,11 +61,14 @@ export function runAction(key: string, id: number, action: string): ActionResult
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
   const lastStatus = meta.statuses[meta.statuses.length - 1]
-  const updated: EntryRow = {
+  let updated: EntryRow = {
     ...rows[index],
     status: target,
     pending: target !== lastStatus,
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
+  }
+  if (key === 'crew') {
+    updated = applyCrewConsistency({ ...updated, 在场状态: target })
   }
   const next = [...rows]
   next[index] = updated
@@ -84,8 +104,19 @@ export function downloadEntries(key: string): void {
   URL.revokeObjectURL(url)
 }
 
+/** 检修人员台账自检报告：落库存的是哪一份，这里读到的就是哪一份。 */
+export function loadCrewReport(): CrewReport {
+  return crewReport()
+}
+
+/** 重新初始化：反复执行幂等，在册人员不重复，自检报告随台账一起重落库。 */
+export function rebuildCrewLedger(): CrewReport {
+  return reinitializeCrew()
+}
+
 export function loadOverview(): OverviewResult {
   const rows = allRows()
+  const report = crewReport()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
     const entries = rows[meta.key] ?? []
     return {
@@ -100,6 +131,9 @@ export function loadOverview(): OverviewResult {
     { label: '登记总量', value: modules.reduce((sum, item) => sum + item.created, 0) },
     { label: '待处理', value: modules.reduce((sum, item) => sum + item.pending, 0) },
     { label: '异常量', value: modules.reduce((sum, item) => sum + item.abnormal, 0) },
+    // 与检修人员页、自检报告同一口径：在场人数在这里必须对得上。
+    { label: '检修在场人员', value: report.totals.onSite },
+    { label: '水情待办', value: report.totals.hydrologyPending },
   ]
   return { cards, modules }
 }

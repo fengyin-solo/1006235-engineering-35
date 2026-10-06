@@ -1,5 +1,7 @@
 services:
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: deploy
     ports:
-      - "5173:5173"
+      - "8080:80"

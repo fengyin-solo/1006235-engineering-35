@@ -7,35 +7,72 @@
 结果都持久化在浏览器 `localStorage` 里，刷新或重开浏览器都还在。dev server 已关掉自动打开页面，
 启动后按终端打印的地址手工打开。
 
+## 检修人员台账：可迁移、可自检的一条链路
+
+检修人员（`crew`）与水情调度（`hydrology`）两个模块不再使用脚手架样例数据，而是由同一条迁移流水线生成。
+流水线是纯 TypeScript 逻辑（`frontend/src/data/crew/pipeline.ts`），浏览器首次播种、`npm run dev`、
+`npm run build`、Docker 镜像构建调用的是同一份代码、同一批固化存量（`frontend/src/data/crew/legacy.ts`），
+因此**本地开发环境与部署环境读到的持证人数、证书即将到期人数、在场人数完全一致**。
+
+阶段只能按顺序推进，跳级会被顺序门（`StageGate`）直接拦下并说明缺哪一步：
+
+1. **提取**：汇集两套老台账（2023 年纸质台账电子化、2026 年门禁导出台账），剔除本地重建残留的样例残档；
+   本机已迁移台账只用于按「姓名+联系电话」给缺号老人员找回上次分配的编号，不作为额外人员。
+2. **核对**：人员编号大写归一、缺号续编；在场状态同义口径归一（离场/撤场→已离场，未进场→待进场）。
+3. **回填**：全册按办理进场时间（业务时间）排序；缺进场时间的取全册最早业务时间补齐；
+   缺证书有效期的按证件复审周期自进场时间滚动到首个不早于基准日的到期日。
+4. **去重**：以归一化**人员编号**为唯一业务键判重（同一编号两条及以上即重复，不管姓名是否一致）；
+   两套取值有争议时**以较晚产生的一套为准**（先比逐条记录更新时间，再比台账套别产生时间），
+   晚者缺的非空字段沿用早者，争议值全册统一。
+5. **自检**：列示 编号重复 / 证书有效期缺失（含补录缘由）/ 在场状态与所属班组矛盾 / 证书已过期，
+   每条都写明缘由与处置；过不变量校验（无重复编号、无缺有效期、无状态班组矛盾）才允许落库。
+
+关键口径（固定基准日 **2026-10-06**，到期窗口 **90 天**，不随运行当天漂移）：
+
+- 持证人员：有持证类型且证书有效期不早于基准日。
+- 证书即将到期：持证有效、有效期落在基准日起 90 天内。
+- 已离场人员统一归入「撤场班组」，撤场班组不允许登记在场；在役人员班组缺项按岗位归班。
+- 早年缺证书有效期：电工/高处/焊接证按 6 年、起重证按 4 年复审周期，自办理进场时间滚动补齐。
+
+自检报告与台账在**同一次 `setItem`** 里落库（键 `hydropower-plant-om:entries`，报告槽位 `__crew_report__`）：
+重新打开页面读到的是同一份；检修人员页的在场条数、报告中的在场人数、运营概览卡片「检修在场人员」
+三处同源对账。页面上办理进场/离场后，报告人数与概览卡片随台账一起更新。
+
+水情记录随台账结论联动：待办（非「已复核」）记录的值守人员若已离场、不在台账或证书过期，
+统一改派给在场持证的值班负责人，改派明细一并写进自检报告——台账与业务清单必须一起变。
+
+反复初始化（检修人员页「重新初始化台账」按钮或脚本连跑）结果逐字节一致，不会多出重复人员。
+
+## 一条流水线：构建、校验、上线、部署
+
+```bash
+make install     # 安装依赖（提交了 package-lock.json，容器内用 npm ci）
+make init        # 只跑台账迁移，生成 frontend/.init-snapshot/crew-ledger.json 快照
+make verify      # 迁移 + 幂等校验（连跑两遍逐字节一致）+ 报告/台账/水情对账
+make smoke       # 浏览器数据层冒烟：首次播种、样例残档修复、反复初始化、双入口对账、动作联动
+make frontend    # 先初始化再启动本地 dev server（http://127.0.0.1:5173/）
+make build       # init --verify → smoke → vue-tsc 类型检查 → vite build，任一步失败立即中断
+make up         # Docker 多阶段构建：容器内先跑 init --verify 再构建 nginx 镜像，部署在 http://localhost:8080/
+```
+
+Dockerfile（`frontend/Dockerfile`）在构建阶段执行 `node scripts/init-data.mjs --verify`，
+迁移或对账不过则镜像直接构建失败；运行阶段为 nginx 静态镜像。
+
 ## 目录结构
 
 ```text
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端（唯一运行单元）
+│   ├── scripts/init-data.mjs     台账初始化脚本（Node 直接跑同一条流水线，--verify 做幂等/对账）
+│   ├── scripts/store-smoke.mjs   浏览器数据层冒烟校验（localStorage 桩驱动真实代码）
 │   ├── src/views/            每个业务模块一个页面
-│   ├── src/api/local-service.ts   本地数据服务：列表、筛选、动作流转、导出
-│   ├── src/data/             模块元数据 / 示例数据 / localStorage 持久化
-│   ├── src/stores/           会话与筛选状态
+│   ├── src/api/local-service.ts   本地数据服务：列表、筛选、动作流转、导出、自检报告、概览对账
+│   ├── src/data/crew/       检修人员迁移链路：流水线 pipeline.ts + 固化存量 legacy.ts
+│   ├── src/data/             模块元数据 / 其余模块示例数据 / localStorage 持久化
 │   └── vite.config.ts        dev server 配置（open: false，无 /api 代理）
-├── .gitignore
-└── docker-compose.yml
-```
-
-## 启动
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-前端默认监听 `http://127.0.0.1:5173/`，dev server 不会自动打开浏览器，需要自己访问。
-
-生产构建：
-
-```bash
-cd frontend
-npm run build
+├── Makefile                  install/init/verify/smoke/build/up 一条命令线
+├── docker-compose.yml        构建并部署 nginx 静态镜像（8080:80）
+└── .env.example
 ```
 
 ## 业务模块
@@ -59,14 +96,16 @@ npm run build
 | 发电计划 | `generation` | 发电计划 | 计划编号、计划日期、计划出力 |
 | 继电保护 | `protection` | 保护装置 | 装置编号、保护类型、定值单号 |
 | 缺陷处置 | `defect` | 设备缺陷 | 缺陷编号、设备名称、缺陷描述 |
-| 检修人员 | `crew` | 检修人员 | 人员编号、姓名、岗位 |
+| 检修人员 | `crew` | 检修人员 | 人员编号、姓名、岗位、持证类型、证书有效期、所属班组、办理进场时间 |
 | 备品备件 | `spare` | 备品备件 | 备件编号、备件名称、规格型号 |
 
 ## 约定
 
 - 每个模块的页面在 `frontend/src/views/<模块>/index.vue`，页面只负责渲染，读写统一走
   `frontend/src/api/local-service.ts`。
-- 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
-  `frontend/src/data/seed.ts`。
-- 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
-- 想回到初始数据：清掉浏览器里 `hydropower-plant-om:entries` 这一项，或调用 `resetModule(模块)`。
+- 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；除检修人员、水情调度外的
+  示例数据在 `frontend/src/data/seed.ts`。
+- 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断；检修人员的进场/离场会同步
+  维护「状态—班组」一致性。
+- 想回到初始数据：清掉浏览器里 `hydropower-plant-om:entries` 这一项，或调用 `resetModule(模块)`；
+  检修人员与水情调度共用一条迁移链路，重置其中一个会整链一起回到初始批次。
