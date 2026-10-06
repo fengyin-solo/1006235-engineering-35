@@ -29,7 +29,7 @@
       </tbody>
     </table>
     <footer class="page-foot">
-      <span>数据保存在本机浏览器里，换浏览器或清缓存会回到示例数据</span>
+      <span>检修人员与水情记录由固化老台账迁移生成，自检结果已落库；换浏览器会按同一套链路重新初始化，结论一致。</span>
     </footer>
   </section>
 </template>

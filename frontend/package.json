@@ -6,9 +6,11 @@
   "repoKind": "frontend-only",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && npm run verify && npm run verify:store && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "verify": "node scripts/run-verify.mjs",
+    "verify:store": "node scripts/run-store-verify.mjs"
   },
   "dependencies": {
     "pinia": "^2.1.7",
@@ -18,8 +20,15 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@vitejs/plugin-vue": "^5.0.4",
+    "esbuild": "^0.21.5",
     "typescript": "^5.4.3",
     "vite": "^5.2.6",
     "vue-tsc": "^2.0.7"
+  },
+  "optionalDependencies": {
+    "@esbuild/linux-arm64": "^0.21.5",
+    "@esbuild/linux-x64": "^0.21.5",
+    "@rollup/rollup-linux-arm64-gnu": "^4.64.0",
+    "@rollup/rollup-linux-x64-gnu": "^4.64.0"
   }
 }

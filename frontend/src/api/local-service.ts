@@ -1,5 +1,8 @@
 import { MODULE_BY_KEY } from '@/data/modules'
-import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { allRows, listRows, resetRows, saveRows, selfCheckReport } from '@/data/local-store'
+import { computeCrewMetrics } from '@/data/migration/pipeline'
+import { REFERENCE_DATE } from '@/data/migration/rules'
+import type { SelfCheckReport } from '@/data/migration/self-check'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
@@ -50,6 +53,10 @@ export function runAction(key: string, id: number, action: string): ActionResult
     pending: target !== lastStatus,
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
   }
+  // 检修人员：页面统计以「在场状态」为准，状态流转时同步过去，两套取值不允许再打架。
+  if (key === 'crew') {
+    updated.在场状态 = target
+  }
   const next = [...rows]
   next[index] = updated
   saveRows(key, next)
@@ -95,11 +102,42 @@ export function loadOverview(): OverviewResult {
       abnormal: entries.filter((row) => row.abnormal).length,
     }
   })
+  const crew = rows.crew ?? []
+  const crewMetrics = computeCrewMetrics(crew)
+  const hydrologyPending = (rows.hydrology ?? []).filter((row) =>
+    ['待观测', '已观测'].includes(String(row.status)),
+  ).length
   const cards = [
     { label: '业务模块', value: modules.length },
     { label: '登记总量', value: modules.reduce((sum, item) => sum + item.created, 0) },
     { label: '待处理', value: modules.reduce((sum, item) => sum + item.pending, 0) },
     { label: '异常量', value: modules.reduce((sum, item) => sum + item.abnormal, 0) },
+    { label: '检修在场人员', value: crewMetrics.在场人员 },
+    { label: '水情待办', value: hydrologyPending },
   ]
   return { cards, modules }
+}
+
+/** 检修人员三项指标：与初始化自检落库的口径完全一致。 */
+export function crewSummary(): SelfCheckReport['metrics'] {
+  return computeCrewMetrics(listRows('crew'))
+}
+
+/** 水情指标：今日取入库/出库流量取基准日最后一条；待调度记录数随检修人员结论联动。 */
+export function hydrologySummary(): { todayInflow: string; todayOutflow: string; pending: number } {
+  const rows = listRows('hydrology')
+  const today = rows
+    .filter((row) => String(row.观测时间) === REFERENCE_DATE)
+    .sort((a, b) => String(a.记录编号).localeCompare(String(b.记录编号)))
+  const latest = today[today.length - 1]
+  return {
+    todayInflow: latest ? String(latest.入库流量) : '—',
+    todayOutflow: latest ? String(latest.出库流量) : '—',
+    pending: rows.filter((row) => ['待观测', '已观测'].includes(String(row.status))).length,
+  }
+}
+
+/** 读取初始化时落库的自检结果（重开页面仍是同一份）。 */
+export function crewSelfCheck(): SelfCheckReport {
+  return selfCheckReport()
 }

@@ -35,3 +35,23 @@ body { margin: 0; background: #f6f8fb; color: #1f2937; }
 .error-text { color: #b42318; }
 .status-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 10px; font-size: 12px; color: var(--muted); }
 .legend-item { background: #eef2f7; border-radius: 999px; padding: 2px 10px; }
+
+/* 初始化自检面板：问题按级别列示，缘由随条注明。 */
+.selfcheck-panel { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+.selfcheck-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.selfcheck-head h3 { margin: 0; font-size: 15px; }
+.selfcheck-meta { font-size: 12px; color: var(--muted); }
+.issue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.issue-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; border-left: 3px solid var(--border); padding: 4px 8px; background: #fafbfc; }
+.issue-item.level-error { border-left-color: #d92d20; background: #fef3f2; }
+.issue-item.level-warn { border-left-color: #dc6803; background: #fffaeb; }
+.issue-item.level-info { border-left-color: #1570ef; background: #eff8ff; }
+.issue-level { font-weight: 600; }
+.issue-item.level-error .issue-level { color: #b42318; }
+.issue-item.level-warn .issue-level { color: #b54708; }
+.issue-item.level-info .issue-level { color: #175cd3; }
+.issue-module { color: var(--muted); }
+.issue-ref { font-weight: 600; white-space: nowrap; }
+.issue-reason { flex-basis: 100%; color: #344054; }
+.issue-empty { font-size: 13px; color: #027a48; margin: 4px 0; }
+.selfcheck-foot { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; }

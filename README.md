@@ -3,7 +3,7 @@
 面向电站台账、机组运行、调速励磁、主变与闸门、大坝渗流位移监测、机组检修与发电计划的一体化水电站运行检修管理平台。
 
 这是一个**纯前端**管理平台：Vue 3 + Vite + TypeScript，仓库里没有后端服务。业务数据由
-`frontend/src/data/` 下的本地数据层提供：首次打开用示例数据播种，之后的登记、筛选与状态流转
+`frontend/src/data/` 下的本地数据层提供：首次打开用初始化链路播种，之后的登记、筛选与状态流转
 结果都持久化在浏览器 `localStorage` 里，刷新或重开浏览器都还在。dev server 已关掉自动打开页面，
 启动后按终端打印的地址手工打开。
 
@@ -12,31 +12,70 @@
 ```text
 .
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端（唯一运行单元）
+│   ├── scripts/              构建前自检（迁移口径校验 + 落库链路桩测试）
 │   ├── src/views/            每个业务模块一个页面
 │   ├── src/api/local-service.ts   本地数据服务：列表、筛选、动作流转、导出
-│   ├── src/data/             模块元数据 / 示例数据 / localStorage 持久化
+│   ├── src/data/             模块元数据 / localStorage 持久化
+│   │   └── migration/        检修人员 + 水情记录的可迁移、可自检初始化链路
 │   ├── src/stores/           会话与筛选状态
-│   └── vite.config.ts        dev server 配置（open: false，无 /api 代理）
-├── .gitignore
-└── docker-compose.yml
+│   ├── Dockerfile            多阶段构建：自检 → 构建 → nginx 托管
+│   └── nginx.conf            SPA 路由回退
+├── Makefile                  install / verify / build / image / up 一条流水线
+└── docker-compose.yml        部署入口（8080:80）
 ```
 
 ## 启动
 
 ```bash
-cd frontend
-npm install
-npm run dev
+make install        # 等价 cd frontend && npm ci，依赖按 package-lock.json 固化
+make frontend       # 本地开发
 ```
 
 前端默认监听 `http://127.0.0.1:5173/`，dev server 不会自动打开浏览器，需要自己访问。
 
-生产构建：
+生产构建（本地与部署环境跑同一条流水线）：
 
 ```bash
-cd frontend
-npm run build
+make build          # 类型检查 → 迁移链路自检 → 落库链路桩测试 → vite build
+make image          # docker compose build，容器内重跑同一条流水线
+make up            # http://localhost:8080
 ```
+
+构建期任一门禁失败都会中止：类型错误、迁移口径漂移、落库不一致都不会上线。
+
+## 检修人员初始化链路
+
+老台账（审批流台账 / 现场手抄台账两套手工取值）固化在
+`src/data/migration/legacy.ts`，由 `src/data/migration/pipeline.ts` 按固定环节顺序迁移，
+环节只能顺序推进，跳级由 `MigrationPipeline` 的守卫直接拦下并说明缺哪一步：
+
+1. **字段规范化 normalize**：老台账按业务时间（办理进场时间）排序，统一重编号为 `CREW-####`；
+2. **人员编号去重 dedupe**：去重字段取**规范化后的人员编号**（同一自然人姓名相同），
+   同号记录按**产生时间较晚的一套为准**，较早一条只在较晚记录字段为空时补缺；
+   两套取值冲突（如在场状态）统一为较晚一套，并在自检里写明；
+3. **缺项补齐 backfill**：所属班组缺失按岗位默认归属补；早年没有证书有效期的，
+   以办理进场时间为业务锚点**补领 4 年**，证书上标 `(补领)`；无证可考的不臆造，列待补证；
+4. **矛盾核定 reconcile**：在场人员挂在已撤编班组（如「老检修队」）的，按岗位改派到在编班组；
+5. **水情待办随结论改派 hydrology-follow**：水情记录待办（待观测/已观测）的值守人员
+   不在场时，优先改派同班组在场持证人员，同班组无人则取编号最小的在场持证人员；
+6. **自检落库 self-check**：编号重复、证书缺项/过期、在场与班组矛盾、水情改派逐条列示缘由，
+   与在场/持证/即将到期人数一起写入 `hydropower-plant-om:crew-self-check`。
+
+口径固定：基准日期 `2026-10-06`、到期窗口 90 天，因此本地与部署环境算出的
+「持证人员」「证书即将到期」完全一致；反复初始化幂等，不会多出重复人员。
+
+页面与另一个入口（运营概览）的在场人数都取 `computeCrewMetrics` 同一口径；
+状态流转后自检报告的指标随台账同步，问题清单保留初始化时的结论。
+
+### 持久化键
+
+| 键 | 内容 |
+| --- | --- |
+| `hydropower-plant-om:entries` | 各模块业务数据（含迁移生成的 crew / hydrology） |
+| `hydropower-plant-om:crew-self-check` | 最近一次初始化的自检报告（问题清单 + 指标） |
+| `hydropower-plant-om:boot` | 链路版本；版本升级时按新链路整体重算台账与水情清单 |
+
+检修人员页的「重新初始化台账」按钮会重跑链路（等价重新迁移），重置即回到链路口径。
 
 ## 业务模块
 
@@ -54,19 +93,20 @@ npm run build
 | 机组检修 | `overhaul` | 检修工作票 | 工作票号、检修机组、检修级别 |
 | 导轴承 | `bearing` | 导轴承 | 轴承编号、所属机组、上导温度 |
 | 技术供水 | `cooling` | 供水系统 | 系统编号、供水类型、供水压力 |
-| 水情调度 | `hydrology` | 水情记录 | 记录编号、观测时间、上游水位 |
+| 水情调度 | `hydrology` | 水情记录 | 记录编号、观测时间、上游水位（待办随检修人员结论改派） |
 | 泄洪操作 | `flood` | 泄洪操作 | 操作编号、泄洪闸号、开启孔数 |
 | 发电计划 | `generation` | 发电计划 | 计划编号、计划日期、计划出力 |
 | 继电保护 | `protection` | 保护装置 | 装置编号、保护类型、定值单号 |
 | 缺陷处置 | `defect` | 设备缺陷 | 缺陷编号、设备名称、缺陷描述 |
-| 检修人员 | `crew` | 检修人员 | 人员编号、姓名、岗位 |
+| 检修人员 | `crew` | 检修人员 | 人员编号、持证类型、证书有效期、所属班组、在场状态 |
 | 备品备件 | `spare` | 备品备件 | 备件编号、备件名称、规格型号 |
 
 ## 约定
 
 - 每个模块的页面在 `frontend/src/views/<模块>/index.vue`，页面只负责渲染，读写统一走
   `frontend/src/api/local-service.ts`。
-- 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
-  `frontend/src/data/seed.ts`。
+- 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；除 crew / hydrology
+  外的静态示例数据在 `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
-- 想回到初始数据：清掉浏览器里 `hydropower-plant-om:entries` 这一项，或调用 `resetModule(模块)`。
+- 想回到初始数据：清掉浏览器里 `hydropower-plant-om:entries` 等三个键，或调用
+  `resetModule(模块)`（检修人员/水情记录的重置即重新走迁移链路）。
